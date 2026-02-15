@@ -2,6 +2,8 @@ import requests
 import os
 import base64
 import json
+import cv2
+import numpy as np
 
 # Base URL of your running FastAPI server
 BASE_SERVER_URL = "https://8000-dep-01khgcb8hf1kcdc87pbkv4bfz1-d.cloudspaces.litng.ai/"
@@ -110,6 +112,52 @@ def segment_image_with_bounding_box(image_path, boxes, labels):
     if result is not None:
         return process_results(result)
 
+def overlay_masks_on_image(image, masks, scores=None, threshold=0.5, alpha=0.5):
+
+    if masks is None or len(masks) == 0:
+        return image
+
+    masks = np.array(masks)
+
+    # remove channel dim if present
+    if masks.ndim == 4:  # (N,1,H,W)
+        masks = masks.squeeze(1)
+
+    N, H, W = masks.shape
+
+    # Resize image to mask size
+    resized_img = cv2.resize(image, (W, H))
+
+    overlay = resized_img.copy()
+
+    # random color generator
+    rng = np.random.default_rng(42)
+
+    for i in range(N):
+        mask = masks[i]
+
+        # threshold probability mask
+        binary = (mask > threshold).astype(np.uint8) * 255
+
+        # create colored mask
+        color = rng.integers(0, 255, size=3, dtype=np.uint8)
+        colored_mask = np.zeros_like(overlay)
+        colored_mask[binary == 255] = color
+
+        # blend
+        overlay = cv2.addWeighted(overlay, 1.0, colored_mask, alpha, 0)
+
+        # optional: draw contour
+        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(overlay, contours, -1, (0,255,0), 2)
+
+        # optional: show score
+        if scores is not None and len(contours) > 0:
+            x,y,w,h = cv2.boundingRect(contours[0])
+            cv2.putText(overlay, f"{scores[i]:.2f}", (x,y-5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
+
+    return overlay
 
 # -------------------------
 # Run Examples
